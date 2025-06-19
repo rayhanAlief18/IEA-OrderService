@@ -18,6 +18,18 @@ class orderController extends Controller
     {
         try {
             $data = order::all();
+            $data->transform(function ($order) {
+                // Ambil user dari user-service
+                $userResponse = Http::get("http://nginx-user/api/getUser/{$order->id_user}");
+                $order->user_data = $userResponse->successful() ? $userResponse->json() : null;
+
+                // Ambil kendaraan dari vehicle-service
+                $vehicleResponse = Http::get("http://nginx-vehicle/api/getVehicle/{$order->id_kendaraan}");
+                $order->kendaraan_data = $vehicleResponse->successful() ? $vehicleResponse->json() : null;
+
+                return $order;
+            });
+
             return response()->json([
                 'message' => 'Berhasil menampilkan data order',
                 'data' => $data,
@@ -38,10 +50,8 @@ class orderController extends Controller
             $validator = Validator::make($request->all(), [
                 'id_user' => 'required|integer',
                 'id_kendaraan' => 'required|integer',
-                'pelayanan' => 'required|string|max:255',
-                'biaya' => 'required|numeric|min:0',
-                'durasi_pengerjaan' => 'required|string|max:100',
-                'no_antrian' => 'required|string|max:50',
+                'nama_pemesan' => 'required|string|max:255',
+                'id_service' => 'required|integer',
             ], [
                 'id_user.required' => 'ID user wajib diisi.',
                 'id_user.integer' => 'ID user harus berupa angka.',
@@ -49,18 +59,12 @@ class orderController extends Controller
                 'id_kendaraan.required' => 'ID kendaraan wajib diisi.',
                 'id_kendaraan.integer' => 'ID kendaraan harus berupa angka.',
 
-                'pelayanan.required' => 'Jenis pelayanan wajib diisi.',
-                'pelayanan.string' => 'Pelayanan harus berupa teks.',
+                'nama_pemesan.required' => 'Jenis pelayanan wajib diisi.',
+                'nama_pemesan.string' => 'Pelayanan harus berupa teks.',
+                'nama_pemesan.max' => 'Maksimal 255 karakter.',
 
-                'biaya.required' => 'Biaya wajib diisi.',
-                'biaya.numeric' => 'Biaya harus berupa angka.',
-                'biaya.min' => 'Biaya tidak boleh negatif.',
-
-                'durasi_pengerjaan.required' => 'Durasi pengerjaan wajib diisi.',
-                'durasi_pengerjaan.string' => 'Durasi pengerjaan harus berupa teks.',
-
-                'no_antrian.required' => 'Nomor antrean wajib diisi.',
-                'no_antrian.string' => 'Nomor antrean harus berupa teks.',
+                'id_service.required' => 'Nomor antrean wajib diisi.',
+                'id_service.integer' => 'Nomor antrean harus berupa teks.',
             ]);
 
             if ($validator->fails()) {
@@ -69,16 +73,17 @@ class orderController extends Controller
                 ], 422);
             }
             // Cek ke user-service
-            $userResponse = Http::get('http://localhost:8000/api/getUser/' . $request->id_user);
-            if (!$userResponse->successful()) {
-                return response()->json(['message' => 'User tidak ditemukan, Silahkan buat ulang'], 404);
-            }
+            $userResponse = Http::get('http://nginx-user/api/getUser/' . $request->id_user);
+            // if (!$userResponse->successful()) {
+            //     return response()->json(['message' => 'User tidak ditemukan, Silahkan buat ulang'], 404);
+            // }
+            
 
             // Cek ke vehicle-service
-            $vehicleResponse = Http::get('http://localhost:8002/api/getVehicle/' . $request->id_kendaraan);
-            if (!$vehicleResponse->successful()) {
-                return response()->json(['message' => 'Kendaraan tidak ditemukan, Silahkan buat ulang'], 404);
-            }
+            $vehicleResponse = Http::get('http://nginx-vehicle/api/getVehicle/' . $request->id_kendaraan);
+            // if (!$vehicleResponse->successful()) {
+            //     return response()->json(['message' => 'Kendaraan tidak ditemukan, Silahkan buat ulang'], 404);
+            // }
 
             // QrCode Progress
             // Generate unique invoice_number
@@ -96,17 +101,23 @@ class orderController extends Controller
 
             $qrImageUrl = asset('storage/qrcodes/' . $fileName);
 
-            // dd($request->all(), $qrImageUrl,$invoice_number);
+            // antrian otomatis
+            // Ambil tanggal hari ini (tanpa jam)
+            $tanggalHariIni = now()->toDateString();
+            // Hitung jumlah order yang dibuat pada hari ini
+            $jumlahOrderHariIni = order::whereDate('created_at', $tanggalHariIni)->count();
+            // Nomor antrean berikutnya
+            $no_antrian = $jumlahOrderHariIni + 1;
 
             $data = order::create([
                 'id_user' => $request->id_user,
                 'id_kendaraan' => $request->id_kendaraan,
-                'pelayanan' => $request->pelayanan,
-                'biaya' => $request->biaya,
-                'durasi_pengerjaan' => $request->durasi_pengerjaan,
-                'no_antrian' => $request->no_antrian,
-                'qr_code' => $qrImageUrl,
                 'invoice_number' => $invoice_number,
+                'qr_code' => $qrImageUrl,
+                'nama_pemesan' => $request->nama_pemesan,
+                'no_antrian' => $no_antrian,
+                'status' => 'Menunggu',
+                'id_service' => $request->id_service,
             ]);
 
             return response()->json([
@@ -129,6 +140,14 @@ class orderController extends Controller
             if ($orders->isEmpty()) {
                 return response()->json(['message' => 'Tidak ada order untuk karyawan ini'], 404);
             }
+            $orders->transform(function ($order) {
+                // Ambil user dari user-service
+                $userResponse = Http::get("http://nginx-user/api/getUser/{$order->id_user}");
+                $order->user_data = $userResponse->successful() ? $userResponse->json() : null;
+
+                return $order;
+            });
+
             return response()->json([
                 'message' => 'Berhasil megambil data history order',
                 'data' => $orders
@@ -163,10 +182,25 @@ class orderController extends Controller
     public function getOrderByDate($date)
     {
         try {
-            $orders = order::whereDate('created_at', $date)->get();
+            $orders = Order::with('service') // pastikan relasi di-join
+                ->whereDate('created_at', $date)
+                ->get();
             if ($orders->isEmpty()) {
                 return response()->json(['message' => 'Tidak ada order pada tanggal ini'], 404);
             }
+            // Loop dan tambahkan user_data dan kendaraan_data dari microservice
+            $orders->transform(function ($order) {
+                // Ambil user dari user-service
+                $userResponse = Http::get("http://nginx-user/api/getUser/{$order->id_user}");
+                $order->user_data = $userResponse->successful() ? $userResponse->json() : null;
+
+                // Ambil kendaraan dari vehicle-service
+                $vehicleResponse = Http::get("http://nginx-vehicle/api/getVehicle/{$order->id_kendaraan}");
+                $order->kendaraan_data = $vehicleResponse->successful() ? $vehicleResponse->json() : null;
+
+                return $order;
+            });
+
             return response()->json([
                 'message' => 'Berhasil megambil data history order berdasarkan tanggal',
                 'data' => $orders

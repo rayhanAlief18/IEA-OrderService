@@ -12,8 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('orders', function (Blueprint $table) {
-            $table->string('qr_code')->unique()->nullable();
-            $table->string('invoice_number')->unique()->after('id');
+            $table->unsignedBigInteger('id_service')->nullable()->after('id_kendaraan');
+            $table->foreign('id_service')->references('id')->on('services')->onDelete('set null');
         });
     }
 
@@ -23,9 +23,8 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('orders', function (Blueprint $table) {
-            $table->dropColumn('qr_code');
-            $table->dropColumn('invoice_number');
-            
+            $table->dropForeign(['id_service']);
+            $table->dropColumn('id_service');
         });
     }
 };

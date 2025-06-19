@@ -15,12 +15,15 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('id_user');
             $table->unsignedBigInteger('id_kendaraan');
-            $table->string('pelayanan');
-            $table->integer('biaya');
-            $table->integer('durasi_pengerjaan');
+            
+            $table->string('invoice_number')->unique()->after('id');
+            $table->string('qr_code')->unique()->nullable();
+            $table->string('nama_pemesan');
             $table->integer('no_antrian');
             $table->enum('status', ['Menunggu', 'Proses', 'Selesai'])->default('Menunggu');
             $table->timestamps();
+
+           
         });
     }
 

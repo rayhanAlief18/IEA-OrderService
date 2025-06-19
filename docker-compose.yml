@@ -11,7 +11,7 @@ services:
     volumes:
       - .:/var/www
     networks:
-      - laravel
+      - laravel-net
     depends_on:
       - db-order
     ports:
@@ -28,11 +28,25 @@ services:
       - "8080:80"
     volumes:
       - .:/var/www
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf  # ✅ ini benar!
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf # ✅ ini benar!
     depends_on:
       - app
     networks:
-      - laravel
+      - laravel-net
+
+  hasura-order:
+    image: hasura/graphql-engine:v2.34.0
+    ports:
+      - "8085:8080" # GUNAKAN PORT BERBEDA AGAR TIDAK BENTROK
+    restart: always
+    depends_on:
+      - db-order
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:admin123@db-order:5432/motor_wash_order_service
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: myadminsecret-order
+    networks:
+      - laravel-net
 
   db-order:
     image: postgres:17
@@ -45,14 +59,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
-      - laravel
+      - laravel-net
     ports:
       - "5433:5432"
-    
 
 volumes:
   pgdata:
 
+
 networks:
-  laravel:
-    driver: bridge
+  laravel-net:
+    external: true
